@@ -67,7 +67,21 @@ export default function ResultsSection({
   };
   
   const handleEnableEdit = () => {
+    console.log('[Tweet] Enabling edit mode');
     setIsEditing(true);
+    
+    // Add a small delay to focus on the textarea
+    setTimeout(() => {
+      const tweetTextarea = document.getElementById('tweetText') as HTMLTextAreaElement;
+      if (tweetTextarea) {
+        tweetTextarea.focus();
+        // Place cursor at the end
+        tweetTextarea.selectionStart = tweetTextarea.value.length;
+        tweetTextarea.selectionEnd = tweetTextarea.value.length;
+      } else {
+        console.error('[Tweet] Could not find tweet textarea element');
+      }
+    }, 100);
   };
   
   const handlePostTweet = async () => {

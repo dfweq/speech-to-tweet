@@ -133,6 +133,87 @@ function createTwitterClient() {
  * 3. Generate new consumer keys and access tokens with appropriate permissions
  * 4. Update the environment secrets with new values
  */
+/**
+ * Posts a thread of tweets to Twitter
+ * Each tweet in the array will be posted as a reply to the previous one
+ * 
+ * @param tweets Array of tweet texts to post as a thread
+ * @returns Object containing array of tweet IDs in the thread and the thread ID (first tweet ID)
+ */
+export async function postTweetThread(tweets: string[]): Promise<{ 
+  ids: string[]; 
+  threadId: string;
+}> {
+  try {
+    // Validate input
+    if (!tweets || tweets.length === 0) {
+      throw new Error("No tweets provided for thread");
+    }
+    
+    // Validate Twitter credentials before attempting to post
+    const credentials = validateTwitterCredentials();
+    if (!credentials.isValid) {
+      const errorMsg = `Cannot post tweet thread: ${credentials.message}`;
+      console.error(`[Twitter] ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+    
+    // Create a new client every time to ensure fresh credentials
+    const rwClient = createTwitterClient();
+    
+    // Initialize response
+    const tweetIds: string[] = [];
+    let replyToId: string | undefined = undefined;
+    
+    // Post each tweet in the thread
+    for (let i = 0; i < tweets.length; i++) {
+      const text = tweets[i];
+      
+      // Validate tweet text
+      if (!text || text.trim().length === 0) {
+        throw new Error(`Tweet #${i+1} in thread cannot be empty`);
+      }
+      
+      if (text.length > 280) {
+        throw new Error(`Tweet #${i+1} in thread exceeds the 280 character limit`);
+      }
+      
+      console.log(`[Twitter] Posting tweet #${i+1} in thread: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`);
+      
+      try {
+        // First tweet in the thread
+        let response;
+        if (!replyToId) {
+          response = await rwClient.v2.tweet(text);
+        } else {
+          // Reply to the previous tweet in the thread
+          response = await rwClient.v2.tweet(text, { 
+            reply: { in_reply_to_tweet_id: replyToId } 
+          });
+        }
+        
+        // Store the tweet ID for the next reply
+        const tweetId = response.data.id;
+        tweetIds.push(tweetId);
+        replyToId = tweetId;
+        
+        console.log(`[Twitter] Successfully posted tweet #${i+1} with ID: ${tweetId}`);
+      } catch (tweetError: any) {
+        throw new Error(`Failed to post tweet #${i+1} in thread: ${tweetError.message || 'Unknown error'}`);
+      }
+    }
+    
+    // Return all tweet IDs and the thread ID (first tweet)
+    return { 
+      ids: tweetIds,
+      threadId: tweetIds[0]
+    };
+  } catch (error: any) {
+    console.error("[Twitter] Error posting tweet thread:", error);
+    throw new Error(`Twitter thread error: ${error.message}`);
+  }
+}
+
 export async function postTweet(text: string): Promise<{ id: string }> {
   try {
     // Validate Twitter credentials before attempting to post
