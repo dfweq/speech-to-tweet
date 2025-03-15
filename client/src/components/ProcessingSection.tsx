@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { FaCogs } from 'react-icons/fa';
 import { Progress } from '@/components/ui/progress';
 import { Card } from '@/components/ui/card';
@@ -28,7 +28,16 @@ export default function ProcessingSection({
       return;
     }
     
+    // Use a ref to prevent duplicate requests in development strict mode  
+    const hasProcessedRef = useRef(false);
+    
     const processAudio = async () => {
+      // Prevent duplicate processing of the same audio blob
+      if (hasProcessedRef.current) {
+        return;
+      }
+      hasProcessedRef.current = true;
+      
       try {
         // Update progress to show transcription started
         setProgress(10);
@@ -84,6 +93,11 @@ export default function ProcessingSection({
     };
     
     processAudio();
+    
+    // Cleanup function to reset the ref when the component unmounts
+    return () => {
+      hasProcessedRef.current = false;
+    };
   }, [audioBlob, onProcessingComplete, onError, setProgress]);
   
   return (
