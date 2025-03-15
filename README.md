@@ -2,8 +2,6 @@
 
 A modern web application that converts your spoken audio into Twitter-ready posts, making social media content creation effortless.
 
-![Voice-to-Tweet](generated-icon.png)
-
 ## Features
 
 - **Audio Recording**: Record your voice directly in the browser
