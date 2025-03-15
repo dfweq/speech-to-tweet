@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
-import { FaRedoAlt, FaPencilAlt, FaPaperPlane, FaSyncAlt } from 'react-icons/fa';
+import { FaRedoAlt, FaPencilAlt, FaPaperPlane, FaSyncAlt, FaTwitter } from 'react-icons/fa';
 import { useToast } from '@/hooks/use-toast';
 import { generateTweetOptions } from '@/lib/openai';
-import { postTweet, checkTwitterCredentials } from '@/lib/twitter';
+import { postTweet, checkTwitterCredentials, verifyTwitterCredentials, postTweetThread } from '@/lib/twitter';
 
 interface ResultsSectionProps {
   tweetText: string;
@@ -88,12 +88,12 @@ export default function ResultsSection({
     try {
       setIsPosting(true);
       
-      // Check Twitter credentials before attempting to post
-      console.log('[Tweet] Checking Twitter credentials before posting');
+      // First check if Twitter credentials exist
+      console.log('[Tweet] Checking if Twitter credentials exist');
       const credentialsCheck = await checkTwitterCredentials();
       
       if (!credentialsCheck.isValid) {
-        // If credentials aren't valid, show a more specific error
+        // If credentials don't exist, show a specific error
         const errorMsg = credentialsCheck.message;
         console.error(`[Tweet] Twitter credentials issue: ${errorMsg}`);
         
@@ -107,7 +107,36 @@ export default function ResultsSection({
         return;
       }
       
-      // Credentials are valid, proceed with posting
+      // Credentials exist, now verify them with Twitter API
+      console.log('[Tweet] Verifying Twitter credentials with API call');
+      const verificationResult = await verifyTwitterCredentials();
+      
+      if (!verificationResult.isValid) {
+        // Credentials exist but are invalid
+        const errorMsg = verificationResult.message;
+        console.error(`[Tweet] Twitter credentials validation failed: ${errorMsg}`);
+        
+        toast({
+          title: "Twitter Authentication Error",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        
+        onError(errorMsg);
+        return;
+      }
+      
+      // Credentials are valid
+      const userData = verificationResult.userData;
+      console.log(`[Tweet] Successfully verified Twitter credentials for user: ${userData?.username || 'unknown'}`);
+      
+      // Show success toast for verification
+      toast({
+        title: "Twitter Verification Success",
+        description: `Verified as @${userData?.username || 'user'}`,
+      });
+      
+      // Post the tweet
       console.log(`[Tweet] Attempting to post tweet: "${tweetText.substring(0, 30)}${tweetText.length > 30 ? '...' : ''}"`);
       await postTweet(tweetText);
       
@@ -178,6 +207,108 @@ export default function ResultsSection({
     }
   };
   
+  // Function to post tweet thread
+  const handlePostTweetThread = async () => {
+    if (localTweets.length === 0) {
+      toast({
+        title: "Error",
+        description: "No tweets available for a thread",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Combine main tweet with additional options
+    const allTweets = [tweetText, ...localTweets];
+    
+    try {
+      setIsPosting(true);
+      
+      // First check if Twitter credentials exist
+      console.log('[Tweet] Checking if Twitter credentials exist for thread');
+      const credentialsCheck = await checkTwitterCredentials();
+      
+      if (!credentialsCheck.isValid) {
+        // If credentials don't exist, show a specific error
+        const errorMsg = credentialsCheck.message;
+        console.error(`[Tweet] Twitter credentials issue: ${errorMsg}`);
+        
+        toast({
+          title: "Twitter Credentials Error",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        
+        onError(errorMsg);
+        return;
+      }
+      
+      // Credentials exist, now verify them with Twitter API
+      console.log('[Tweet] Verifying Twitter credentials with API call');
+      const verificationResult = await verifyTwitterCredentials();
+      
+      if (!verificationResult.isValid) {
+        // Credentials exist but are invalid
+        const errorMsg = verificationResult.message;
+        console.error(`[Tweet] Twitter credentials validation failed: ${errorMsg}`);
+        
+        toast({
+          title: "Twitter Authentication Error",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        
+        onError(errorMsg);
+        return;
+      }
+      
+      // Credentials are valid
+      const userData = verificationResult.userData;
+      console.log(`[Tweet] Successfully verified Twitter credentials for user: ${userData?.username || 'unknown'}`);
+      
+      // Post the tweet thread
+      console.log(`[Tweet] Attempting to post tweet thread with ${allTweets.length} tweets`);
+      await postTweetThread(allTweets);
+      
+      toast({
+        title: "Success!",
+        description: `Your thread with ${allTweets.length} tweets was posted successfully`,
+      });
+      
+      onPostSuccess();
+    } catch (error: any) {
+      console.error('Error posting tweet thread:', error);
+      
+      // Extract a more helpful error message if possible
+      let errorMessage = "Failed to post tweet thread.";
+      
+      if (error && error.message) {
+        // Check for specific error types
+        if (error.message.includes("401") || error.message.includes("Authentication failed")) {
+          errorMessage = "Twitter authentication failed. Your API credentials may be invalid or expired.";
+        } else if (error.message.includes("403") || error.message.includes("Permission denied")) {
+          errorMessage = "Permission denied by Twitter. Your app may not have write permissions.";
+        } else if (error.message.includes("429") || error.message.includes("rate limit")) {
+          errorMessage = "Twitter rate limit exceeded. Please try again in a few minutes.";
+        } else {
+          // Use the error message from the API
+          errorMessage = `Error: ${error.message}`;
+        }
+      }
+      
+      // Show error toast
+      toast({
+        title: "Tweet Thread Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
+      
+      onError(errorMessage);
+    } finally {
+      setIsPosting(false);
+    }
+  };
+
   return (
     <div id="resultsSection">
       {/* Tweet Preview */}
@@ -247,14 +378,25 @@ export default function ResultsSection({
           </div>
         ))}
 
-        <button 
-          className="w-full px-4 py-2 rounded-full border border-[#E1E8ED] text-[#657786] hover:bg-[#E1E8ED] transition-colors focus:outline-none disabled:opacity-50"
-          onClick={handleRefreshOptions}
-          disabled={isGenerating}
-        >
-          <FaSyncAlt className="inline mr-2" />
-          {isGenerating ? "Generating..." : "Generate More Options"}
-        </button>
+        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
+          <button 
+            className="w-full sm:w-1/2 px-4 py-2 rounded-full border border-[#E1E8ED] text-[#657786] hover:bg-[#E1E8ED] transition-colors focus:outline-none disabled:opacity-50"
+            onClick={handleRefreshOptions}
+            disabled={isGenerating || isPosting}
+          >
+            <FaSyncAlt className="inline mr-2" />
+            {isGenerating ? "Generating..." : "Generate More Options"}
+          </button>
+          
+          <button 
+            className="w-full sm:w-1/2 px-4 py-2 rounded-full bg-[#1DA1F2] text-white hover:bg-opacity-90 transition-colors focus:outline-none disabled:opacity-50"
+            onClick={handlePostTweetThread}
+            disabled={isPosting || localTweets.length === 0}
+          >
+            <FaPaperPlane className="inline mr-2" />
+            {isPosting ? "Posting..." : "Post as Thread"}
+          </button>
+        </div>
       </Card>
     </div>
   );
