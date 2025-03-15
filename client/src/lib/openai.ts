@@ -21,7 +21,26 @@ export async function transcribeAudio(
 }
 
 /**
+ * Processes raw transcription and creates a coherent tweet thread in a single call
+ * This is the improved workflow that handles both grammar correction and tweet formatting
+ */
+export async function processTranscriptionAndCreateTweet(text: string): Promise<string[]> {
+  try {
+    const response = await apiRequest('POST', '/api/process-and-create-tweet', {
+      text
+    });
+    
+    const data = await response.json();
+    return data.tweets;
+  } catch (error) {
+    console.error('Error processing transcription and creating tweet:', error);
+    throw new Error('Failed to process transcription and create tweet');
+  }
+}
+
+/**
  * Generates tweet options from transcribed text
+ * Kept for backward compatibility
  */
 export async function generateTweetOptions(
   text: string,

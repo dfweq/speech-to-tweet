@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { FaCogs } from 'react-icons/fa';
 import { Progress } from '@/components/ui/progress';
 import { Card } from '@/components/ui/card';
-import { transcribeAudio, generateTweetOptions } from '@/lib/openai';
+import { transcribeAudio, processTranscriptionAndCreateTweet } from '@/lib/openai';
 
 interface ProcessingSectionProps {
   progress: number;
@@ -70,9 +70,9 @@ export default function ProcessingSection({
             return;
           }
           
-          // Generate tweet options
+          // Process transcription and generate tweet options in one call
           setProgress(60);
-          const tweets = await generateTweetOptions(transcript);
+          const tweets = await processTranscriptionAndCreateTweet(transcript);
           
           // Complete processing
           setProgress(100);

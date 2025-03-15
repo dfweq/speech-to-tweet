@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { z } from "zod";
 import { transcribeAudioSchema, generateTweetSchema, postTweetSchema } from "../shared/schema";
-import { transcribeAudio, generateTweetOptions, processTranscription, createTweetThread } from "./openai";
+import { transcribeAudio, generateTweetOptions, processTranscription, createTweetThread, processTranscriptionAndCreateTweet } from "./openai";
 import { postTweet } from "./twitter";
 import multer from "multer";
 
@@ -38,7 +38,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // New routes for the improved workflow
+  // New unified route for the improved workflow
+  app.post("/api/process-and-create-tweet", async (req, res) => {
+    try {
+      const { text } = req.body;
+      const validatedData = generateTweetSchema.parse({ text });
+      
+      // Process transcription and create tweet thread in one call
+      const tweets = await processTranscriptionAndCreateTweet(validatedData.text);
+      
+      res.json({ tweets });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid request data", errors: error.errors });
+      } else {
+        console.error("Error in /api/process-and-create-tweet:", error);
+        res.status(500).json({ message: "Failed to process transcription and create tweet" });
+      }
+    }
+  });
+  
+  // Keep these for backward compatibility
   app.post("/api/process-transcription", async (req, res) => {
     try {
       const { text } = req.body;
