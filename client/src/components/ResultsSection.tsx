@@ -87,11 +87,44 @@ export default function ResultsSection({
     
     try {
       setIsPosting(true);
+      
+      console.log(`[Tweet] Attempting to post tweet: "${tweetText.substring(0, 30)}${tweetText.length > 30 ? '...' : ''}"`);
       await postTweet(tweetText);
+      
+      toast({
+        title: "Success!",
+        description: "Your tweet was posted successfully",
+      });
+      
       onPostSuccess();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error posting tweet:', error);
-      onError("Failed to post tweet. Please ensure you are connected to Twitter.");
+      
+      // Extract a more helpful error message if possible
+      let errorMessage = "Failed to post tweet.";
+      
+      if (error && error.message) {
+        // Check for specific error types
+        if (error.message.includes("401")) {
+          errorMessage = "Twitter authentication failed. Your API credentials may be invalid or expired.";
+        } else if (error.message.includes("403")) {
+          errorMessage = "Permission denied by Twitter. Your app may not have write permissions.";
+        } else if (error.message.includes("429")) {
+          errorMessage = "Twitter rate limit exceeded. Please try again in a few minutes.";
+        } else {
+          // Use the error message from the API
+          errorMessage = `Error: ${error.message}`;
+        }
+      }
+      
+      // Show error toast
+      toast({
+        title: "Tweet Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
+      
+      onError(errorMessage);
     } finally {
       setIsPosting(false);
     }
