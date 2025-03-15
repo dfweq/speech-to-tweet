@@ -113,7 +113,7 @@ export async function transcribeAudio(
 
 /**
  * Processes raw transcription and creates a coherent tweet thread in a single call
- * Uses caching to prevent duplicate API calls
+ * Uses GPT-4o-mini for faster processing with caching to prevent duplicate API calls
  */
 export async function processTranscriptionAndCreateTweet(rawTranscript: string): Promise<string[]> {
   // Avoid processing empty transcripts
@@ -144,7 +144,7 @@ export async function processTranscriptionAndCreateTweet(rawTranscript: string):
     while (retries < maxRetries) {
       try {
         const response = await openai.chat.completions.create({
-          model: "gpt-4o-mini", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024
+          model: "gpt-4o-mini", // using the smaller and faster GPT-4o-mini model as requested
           messages: [
             {
               role: "system",
@@ -227,7 +227,7 @@ export async function createTweetThread(processedText: string): Promise<string[]
 }
 
 /**
- * Generates alternative tweet options from text using GPT-4o
+ * Generates alternative tweet options from text using GPT-4o-mini
  * This function is used for tweet regeneration and alternative generation
  */
 export async function generateTweetOptions(
@@ -282,7 +282,7 @@ export async function generateTweetOptions(
     while (retries < maxRetries) {
       try {
         const response = await openai.chat.completions.create({
-          model: "gpt-4o", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024
+          model: "gpt-4o-mini", // using the smaller and faster GPT-4o-mini model as requested
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt }
