@@ -228,7 +228,7 @@ export async function createTweetThread(processedText: string): Promise<string[]
 
 /**
  * Generates alternative tweet options from text using GPT-4o
- * This function is kept for backward compatibility
+ * This function is used for tweet regeneration and alternative generation
  */
 export async function generateTweetOptions(
   text: string,
@@ -237,6 +237,19 @@ export async function generateTweetOptions(
   try {
     console.log(`[GPT-4o] Generating tweet options for: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"`);
     console.log(`[GPT-4o] Mode: ${alternativesOnly ? 'Alternative options' : 'Initial generation'}`);
+
+    // Clean expired cache entries from similar cached responses
+    cleanExpiredCache(tweetGenerationCache);
+    
+    // Use text+mode as the cache key to differentiate between initial and alternative generations
+    const cacheKey = `${text.trim()}|${alternativesOnly ? 'alt' : 'init'}`;
+    
+    // Check if we have a cached result
+    const cachedResult = tweetGenerationCache.get(cacheKey);
+    if (cachedResult) {
+      console.log(`[GPT-4o] Using cached tweet options with ${cachedResult.value.length} options`);
+      return cachedResult.value;
+    }
 
     const systemPrompt = alternativesOnly 
       ? "Generate 2 alternative tweet versions that maintain the exact same authentic voice, casual style, and personality. Your goal is to preserve the author's unique voice while offering subtle variations."
@@ -249,46 +262,84 @@ export async function generateTweetOptions(
          1. Maintain the same casual tone and informal language
          2. Keep all quirks, speaking patterns, and personal expressions
          3. Only make minimal formatting changes to fit Twitter
-         4. The tweets must sound exactly like me, not a polished version`
+         4. The tweets must sound exactly like me, not a polished version
+         
+         Return as a JSON object with the key "tweets" containing an array of tweet strings.`
       : `Here is the transcribed speech: "${text}"
          
          IMPORTANT: Do NOT polish or formalize. Keep my authentic voice and style.
          1. Maintain the same casual tone and informal language
          2. Keep all quirks, speaking patterns, and personal expressions
          3. Only make minimal formatting changes to fit Twitter
-         4. The tweets must sound exactly like me, not a polished version`;
+         4. The tweets must sound exactly like me, not a polished version
+         
+         Return as a JSON object with the key "tweets" containing an array of tweet strings.`;
     
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ],
-      response_format: { type: "json_object" },
-      max_tokens: 1000,
-    });
+    // Make sure we don't exceed rate limits by implementing simple exponential backoff
+    let retries = 0;
+    const maxRetries = 3;
     
-    const content = response.choices[0].message.content || "{}";
-    const parsedResponse = JSON.parse(content);
-    
-    // Extract tweets from the response
-    let tweets: string[] = [];
-    if (Array.isArray(parsedResponse.tweets)) {
-      tweets = parsedResponse.tweets;
-    } else if (Array.isArray(parsedResponse)) {
-      tweets = parsedResponse;
-    } else {
-      console.error("Unexpected response format:", parsedResponse);
-      tweets = [text]; // Fallback to original text
+    while (retries < maxRetries) {
+      try {
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.7, // Slightly higher temperature for more varied options
+          max_tokens: 1000,
+        });
+        
+        const content = response.choices[0].message.content || "{}";
+        const parsedResponse = JSON.parse(content);
+        
+        // Extract tweets from the response
+        let tweets: string[] = [];
+        if (Array.isArray(parsedResponse.tweets)) {
+          tweets = parsedResponse.tweets;
+        } else if (Array.isArray(parsedResponse)) {
+          tweets = parsedResponse;
+        } else {
+          console.error("Unexpected response format:", parsedResponse);
+          tweets = [text]; // Fallback to original text
+        }
+        
+        // Log the generated tweets
+        console.log(`[GPT-4o] Generated ${tweets.length} tweet options:`);
+        tweets.forEach((tweet, index) => {
+          console.log(`[GPT-4o] Option ${index + 1}: "${tweet}"`);
+        });
+        
+        // Cache the result
+        tweetGenerationCache.set(cacheKey, {
+          value: tweets,
+          timestamp: Date.now()
+        });
+        
+        return tweets;
+      } catch (error: any) {
+        retries++;
+        
+        // Check if it's a rate limit error
+        if (error.status === 429 && retries < maxRetries) {
+          const retryAfterMs = parseInt(error.headers?.["retry-after-ms"] || "1000", 10);
+          const waitTime = Math.min(retryAfterMs, 2000 * Math.pow(2, retries));
+          
+          console.log(`[GPT-4o] Rate limit reached, retrying after ${waitTime}ms (attempt ${retries} of ${maxRetries})`);
+          
+          // Wait for the specified time before retrying
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        } else {
+          // Rethrow if it's not a rate limit error or we've exceeded max retries
+          throw error;
+        }
+      }
     }
     
-    // Log the generated tweets
-    console.log(`[GPT-4o] Generated ${tweets.length} tweet options:`);
-    tweets.forEach((tweet, index) => {
-      console.log(`[GPT-4o] Option ${index + 1}: "${tweet}"`);
-    });
-    
-    return tweets;
+    // If we get here, we've exceeded our retry attempts
+    throw new Error(`Failed to generate tweet options after ${maxRetries} attempts`);
   } catch (error) {
     console.error("OpenAI GPT-4o API error:", error);
     // Fallback to original text
