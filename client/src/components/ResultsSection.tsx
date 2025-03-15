@@ -4,6 +4,8 @@ import { FaRedoAlt, FaPencilAlt, FaPaperPlane, FaSyncAlt, FaTwitter } from 'reac
 import { useToast } from '@/hooks/use-toast';
 import { generateTweetOptions } from '@/lib/openai';
 import { postTweet, checkTwitterCredentials, verifyTwitterCredentials, postTweetThread } from '@/lib/twitter';
+import TwitterApiError from '@/components/TwitterApiError';
+import { requestTwitterCredentials } from '@/lib/credential-helpers';
 
 interface ResultsSectionProps {
   tweetText: string;
@@ -25,6 +27,8 @@ export default function ResultsSection({
   const [isPosting, setIsPosting] = useState<boolean>(false);
   const [localTweets, setLocalTweets] = useState<string[]>(additionalTweets);
   const [characterCount, setCharacterCount] = useState<number>(tweetText.length);
+  const [showTwitterError, setShowTwitterError] = useState<boolean>(false);
+  const [twitterErrorMessage, setTwitterErrorMessage] = useState<string>('');
   
   const { toast } = useToast();
   
@@ -93,13 +97,17 @@ export default function ResultsSection({
       const credentialsCheck = await checkTwitterCredentials();
       
       if (!credentialsCheck.isValid) {
-        // If credentials don't exist, show a specific error
+        // If credentials don't exist, show the Twitter API error dialog
         const errorMsg = credentialsCheck.message;
         console.error(`[Tweet] Twitter credentials issue: ${errorMsg}`);
         
+        // Set error message and show the Twitter API error dialog
+        setTwitterErrorMessage(errorMsg);
+        setShowTwitterError(true);
+        
         toast({
           title: "Twitter Credentials Error",
-          description: errorMsg,
+          description: "Please update your Twitter API credentials",
           variant: "destructive",
         });
         
@@ -309,8 +317,44 @@ export default function ResultsSection({
     }
   };
 
+  // Handler for requesting updated Twitter credentials
+  const handleRequestCredentials = async () => {
+    try {
+      const success = await requestTwitterCredentials();
+      if (success) {
+        toast({
+          title: "Credentials Updated",
+          description: "Twitter API credentials have been updated. Please try again.",
+        });
+        setShowTwitterError(false);
+      } else {
+        toast({
+          title: "Update Failed",
+          description: "Failed to update Twitter API credentials.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error('[Tweet] Error updating credentials:', error);
+      toast({
+        title: "Update Error",
+        description: "An error occurred while updating credentials.",
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div id="resultsSection">
+      {/* Twitter API Error Dialog */}
+      {showTwitterError && (
+        <TwitterApiError 
+          message={twitterErrorMessage}
+          onClose={() => setShowTwitterError(false)}
+          onUpdateCredentials={handleRequestCredentials}
+        />
+      )}
+
       {/* Tweet Preview */}
       <Card className="bg-white rounded-xl shadow-sm p-6 mb-6">
         <h3 className="text-lg font-semibold text-[#14171A] mb-4">Tweet Preview</h3>
