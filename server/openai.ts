@@ -148,22 +148,25 @@ export async function processTranscriptionAndCreateTweet(rawTranscript: string):
           messages: [
             {
               role: "system",
-              content: "You are a text editor and Twitter specialist that improves transcribed speech and formats it for Twitter. You fix grammar, remove filler words, make the text coherent, and format it appropriately for Twitter's character limits."
+              content: "You are a minimal text processor for Twitter that makes only essential changes to preserve the original voice, style and personality. Your primary goal is authenticity - the tweets should sound exactly like the person who recorded them."
             },
             {
               role: "user",
               content: `This is a raw speech-to-text transcription: "${rawTranscript}"
                        
-                       Please:
-                       1. Fix grammar and make the text coherent while preserving the original meaning
-                       2. Remove filler words and repetitive language
-                       3. Format as a tweet or tweet thread:
-                          - If under 280 characters, return as a single tweet
-                          - If longer, split into multiple tweets (max 280 chars each)
-                          - Split at natural breaks (end of sentences)
-                          - Add thread numbering (1/n, 2/n, etc.) if multiple tweets
-                          - Each tweet should read well independently and as part of the thread
-                       4. Return as a JSON array of tweet strings`
+                       IMPORTANT: Make only MINIMAL adjustments:
+                       1. Fix only MAJOR grammar errors that impact understanding
+                       2. DO NOT rephrase, restructure sentences, or change tone/voice
+                       3. DO NOT remove casual language, personal style, or speaking quirks
+                       4. DO NOT add professional polish or make the text formal
+                       5. KEEP my authentic voice exactly as is
+                       
+                       Format only for Twitter's character limits:
+                          - If under 280 characters, return as a single tweet unchanged
+                          - If longer, split at natural sentence breaks (max 280 chars each)
+                          - Add minimal thread numbering if multiple tweets (1/n, 2/n)
+                       
+                       Return as a JSON array of tweet strings that sound exactly like me`
             }
           ],
           temperature: 0.4,
@@ -236,12 +239,24 @@ export async function generateTweetOptions(
     console.log(`[GPT-4o] Mode: ${alternativesOnly ? 'Alternative options' : 'Initial generation'}`);
 
     const systemPrompt = alternativesOnly 
-      ? "Generate 2 alternative tweet versions from the original text. Each tweet should be under 280 characters, engaging, and optimized for social media. Format your response as a JSON array of strings with just the tweet text."
-      : "Convert the following transcribed speech into 3 Twitter-ready posts. Each tweet should be under 280 characters, engaging, and maintain the core message. Format your response as a JSON array of strings with just the tweet text.";
+      ? "Generate 2 alternative tweet versions that maintain the exact same authentic voice, casual style, and personality. Your goal is to preserve the author's unique voice while offering subtle variations."
+      : "Convert the following transcribed speech into 3 Twitter-ready posts that sound exactly like the person who recorded them. Preserve their authentic voice, casual style, and personality.";
     
     const userPrompt = alternativesOnly 
-      ? `Generate alternative tweet versions for this existing tweet: "${text}"`
-      : `Here is the transcribed speech: "${text}"`;
+      ? `Generate alternative tweet versions for this existing tweet: "${text}"
+         
+         IMPORTANT: Do NOT polish or formalize. Keep my authentic voice and style.
+         1. Maintain the same casual tone and informal language
+         2. Keep all quirks, speaking patterns, and personal expressions
+         3. Only make minimal formatting changes to fit Twitter
+         4. The tweets must sound exactly like me, not a polished version`
+      : `Here is the transcribed speech: "${text}"
+         
+         IMPORTANT: Do NOT polish or formalize. Keep my authentic voice and style.
+         1. Maintain the same casual tone and informal language
+         2. Keep all quirks, speaking patterns, and personal expressions
+         3. Only make minimal formatting changes to fit Twitter
+         4. The tweets must sound exactly like me, not a polished version`;
     
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
