@@ -53,60 +53,94 @@ export default function RecordingSection({ onRecordingComplete, onError }: Recor
 
   const stopRecording = () => {
     if (recorderRef.current) {
-      recorderRef.current.stopRecording(() => {
-        const blob = recorderRef.current?.getBlob();
-        if (blob) {
-          onRecordingComplete(blob);
-        }
+      // Use a flag to prevent multiple calls in React strict mode
+      const isStoppingRef = { current: false };
+      
+      if (!isStoppingRef.current) {
+        isStoppingRef.current = true;
         
-        // Stop timer
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
-        
-        // Stop media stream
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
-          streamRef.current = null;
-        }
-        
-        recorderRef.current = null;
-        setIsRecording(false);
-      });
+        recorderRef.current.stopRecording(() => {
+          const blob = recorderRef.current?.getBlob();
+          if (blob) {
+            // Add a small delay to ensure we don't create multiple blobs
+            setTimeout(() => {
+              onRecordingComplete(blob);
+            }, 10);
+          }
+          
+          // Stop timer
+          if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+          }
+          
+          // Stop media stream
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+          }
+          
+          recorderRef.current = null;
+          setIsRecording(false);
+        });
+      }
     }
   };
 
   const handleCancel = () => {
     if (recorderRef.current) {
-      recorderRef.current.stopRecording(() => {
-        // Stop timer
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-          timerRef.current = null;
-        }
+      // Use a flag to prevent multiple calls in React strict mode
+      const isCancellingRef = { current: false };
+      
+      if (!isCancellingRef.current) {
+        isCancellingRef.current = true;
         
-        // Stop media stream
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
-          streamRef.current = null;
-        }
-        
-        recorderRef.current = null;
-        setIsRecording(false);
-        setRecordingTime(0);
-      });
+        recorderRef.current.stopRecording(() => {
+          // Stop timer
+          if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+          }
+          
+          // Stop media stream
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+          }
+          
+          recorderRef.current = null;
+          setIsRecording(false);
+          setRecordingTime(0);
+        });
+      }
     }
   };
 
+  // Track the last uploaded file to prevent duplicates
+  const lastUploadedFileRef = useRef<string>('');
+  
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files && files.length > 0) {
       const file = files[0];
       const validTypes = ['audio/wav', 'audio/mpeg', 'audio/ogg', 'audio/webm'];
       
+      // Generate a simple identifier for this file
+      const fileId = `${file.name}-${file.size}-${file.lastModified}`;
+      
+      // Check if we've already processed this file
+      if (fileId === lastUploadedFileRef.current) {
+        return; // Skip if already processed
+      }
+      
+      // Save this file's identifier
+      lastUploadedFileRef.current = fileId;
+      
       if (validTypes.includes(file.type)) {
-        onRecordingComplete(file);
+        // Small delay to ensure we don't trigger multiple processing events
+        setTimeout(() => {
+          onRecordingComplete(file);
+        }, 10);
       } else {
         onError("Please upload a valid audio file (WAV, MP3, OGG, or WebM).");
       }

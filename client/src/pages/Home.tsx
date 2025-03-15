@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import RecordingSection from "@/components/RecordingSection";
 import ProcessingSection from "@/components/ProcessingSection";
 import ResultsSection from "@/components/ResultsSection";
@@ -8,6 +8,10 @@ import { FaTwitter } from "react-icons/fa";
 
 type ViewState = "recording" | "processing" | "results" | "success" | "error";
 
+// Create a module-scope (outside of component) flag to prevent duplicate processing
+// This helps with React's strict mode which runs effects twice in development
+let isCurrentlyProcessing = false;
+
 export default function Home() {
   const [viewState, setViewState] = useState<ViewState>("recording");
   const [transcript, setTranscript] = useState<string>("");
@@ -16,14 +20,34 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [processingProgress, setProcessingProgress] = useState<number>(0);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  
+  // Use a ref to track the last processed blob's identifier
+  const lastProcessedBlobId = useRef<string>('');
 
   const handleRecordingComplete = (blob: Blob) => {
+    // Create a unique identifier for this blob
+    const blobId = `${blob.size}-${blob.type}-${Date.now()}`;
+    
+    // Check if we're already processing or have processed this blob
+    if (isCurrentlyProcessing || blobId === lastProcessedBlobId.current) {
+      console.log('Skipping duplicate processing request');
+      return;
+    }
+    
+    // Set global processing flag and save blob identifier
+    isCurrentlyProcessing = true;
+    lastProcessedBlobId.current = blobId;
+    
+    // Update state to begin processing
     setAudioBlob(blob);
     setViewState("processing");
     setProcessingProgress(0);
   };
 
   const handleProcessingComplete = (text: string, tweets: string[]) => {
+    // Reset the global processing flag
+    isCurrentlyProcessing = false;
+    
     setTranscript(text);
     setTweetText(tweets[0] || "");
     setAdditionalTweets(tweets.slice(1));
@@ -35,11 +59,17 @@ export default function Home() {
   };
 
   const handleError = (message: string) => {
+    // Reset the global processing flag
+    isCurrentlyProcessing = false;
+    
     setErrorMessage(message);
     setViewState("error");
   };
 
   const resetToRecording = () => {
+    // Reset the global processing flag
+    isCurrentlyProcessing = false;
+    
     setViewState("recording");
     setTranscript("");
     setTweetText("");

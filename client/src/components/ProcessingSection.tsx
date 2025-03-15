@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FaCogs } from 'react-icons/fa';
 import { Progress } from '@/components/ui/progress';
 import { Card } from '@/components/ui/card';
@@ -21,23 +21,32 @@ export default function ProcessingSection({
   onCancel,
   onError
 }: ProcessingSectionProps) {
+  // Track whether we've started processing
+  const [isProcessing, setIsProcessing] = useState(false);
   
-  // Use a ref to prevent duplicate requests in development strict mode  
-  const hasProcessedRef = useRef(false);
+  // Use a ref to store the audioBlob identifier (size + type)
+  const currentAudioBlobId = useRef<string>('');
 
   useEffect(() => {
+    // Exit early if no audio blob
     if (!audioBlob) {
       onError("No audio data found. Please try recording again.");
       return;
     }
     
+    // Generate a simple identifier for this audio blob
+    const audioBlobId = `${audioBlob.size}-${audioBlob.type}`;
+    
+    // Skip if we've already processed this exact audio blob
+    if (isProcessing || audioBlobId === currentAudioBlobId.current) {
+      return;
+    }
+    
+    // Set processing state and store the blob id
+    setIsProcessing(true);
+    currentAudioBlobId.current = audioBlobId;
+    
     const processAudio = async () => {
-      // Prevent duplicate processing of the same audio blob
-      if (hasProcessedRef.current) {
-        return;
-      }
-      hasProcessedRef.current = true;
-      
       try {
         // Update progress to show transcription started
         setProgress(10);
@@ -49,6 +58,7 @@ export default function ProcessingSection({
         reader.onload = async () => {
           if (typeof reader.result !== 'string') {
             onError("Failed to process audio file.");
+            setIsProcessing(false);
             return;
           }
           
@@ -61,44 +71,51 @@ export default function ProcessingSection({
           else if (audioBlob.type.includes('mp3')) format = 'mp3';
           else if (audioBlob.type.includes('ogg')) format = 'ogg';
           
-          // Transcribe audio
-          setProgress(30);
-          const { transcript } = await transcribeAudio(base64Audio, format);
-          
-          if (!transcript) {
-            onError("Could not transcribe the audio. Please try again with clearer audio.");
-            return;
+          try {
+            // Transcribe audio
+            setProgress(30);
+            const { transcript } = await transcribeAudio(base64Audio, format);
+            
+            if (!transcript) {
+              onError("Could not transcribe the audio. Please try again with clearer audio.");
+              setIsProcessing(false);
+              return;
+            }
+            
+            // Process transcription and generate tweet options in one call
+            setProgress(60);
+            const tweets = await processTranscriptionAndCreateTweet(transcript);
+            
+            // Complete processing
+            setProgress(100);
+            
+            // Wait a moment at 100% for visual feedback
+            setTimeout(() => {
+              onProcessingComplete(transcript, tweets);
+              setIsProcessing(false);
+            }, 500);
+          } catch (error) {
+            console.error('API error:', error);
+            onError("An error occurred while processing your audio. Please try again.");
+            setIsProcessing(false);
           }
-          
-          // Process transcription and generate tweet options in one call
-          setProgress(60);
-          const tweets = await processTranscriptionAndCreateTweet(transcript);
-          
-          // Complete processing
-          setProgress(100);
-          
-          // Wait a moment at 100% for visual feedback
-          setTimeout(() => {
-            onProcessingComplete(transcript, tweets);
-          }, 500);
         };
         
         reader.onerror = () => {
           onError("Failed to read audio file. Please try again.");
+          setIsProcessing(false);
         };
       } catch (error) {
         console.error('Error processing audio:', error);
         onError("An error occurred while processing your audio. Please try again.");
+        setIsProcessing(false);
       }
     };
     
     processAudio();
     
-    // Cleanup function to reset the ref when the component unmounts
-    return () => {
-      hasProcessedRef.current = false;
-    };
-  }, [audioBlob, onProcessingComplete, onError, setProgress]);
+    // No need for cleanup to reset processing state as we do it inline
+  }, [audioBlob, onProcessingComplete, onError, setProgress, isProcessing]);
   
   return (
     <Card className="bg-white rounded-xl shadow-sm p-6 mb-6">
