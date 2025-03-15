@@ -9,12 +9,48 @@ interface RecordingSectionProps {
   onError: (message: string) => void;
 }
 
+// Keep track of processed recordings and file uploads across component instances
+// This addresses issues with React strict mode mounting components twice
+const processedRecordings = new Set<string>();
+const processedFileUploads = new Set<string>();
+
 export default function RecordingSection({ onRecordingComplete, onError }: RecordingSectionProps) {
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingTime, setRecordingTime] = useState<number>(0);
+  
+  // Use refs to track state across rerenders and React strict mode double-mounting
   const recorderRef = useRef<RecordRTC | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | null>(null);
+  const isStartingRef = useRef<boolean>(false);
+  const isStoppingRef = useRef<boolean>(false);
+  const isCancellingRef = useRef<boolean>(false);
+  const unmountedRef = useRef<boolean>(false);
+  
+  // Track the timestamp of the last recording sent to avoid duplicates
+  const lastRecordingIdRef = useRef<string>('');
+
+  // Set up cleanup on unmount
+  useEffect(() => {
+    return () => {
+      unmountedRef.current = true;
+      
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      
+      if (recorderRef.current) {
+        recorderRef.current.stopRecording();
+        recorderRef.current = null;
+      }
+    };
+  }, []);
 
   const formatTime = (seconds: number): string => {
     const minutes = Math.floor(seconds / 60);
@@ -23,8 +59,27 @@ export default function RecordingSection({ onRecordingComplete, onError }: Recor
   };
 
   const startRecording = async () => {
+    // Prevent duplicate start in React strict mode
+    if (isStartingRef.current || isRecording || recorderRef.current) {
+      console.log("[Recording] Already recording or starting, ignoring duplicate call");
+      return;
+    }
+    
+    // Set flag to prevent multiple starts
+    isStartingRef.current = true;
+    
     try {
+      console.log("[Recording] Requesting microphone access");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Check if component was unmounted during the async operation
+      if (unmountedRef.current) {
+        console.log("[Recording] Component unmounted during microphone access, cleaning up");
+        stream.getTracks().forEach(track => track.stop());
+        isStartingRef.current = false;
+        return;
+      }
+      
       streamRef.current = stream;
       
       const recorder = new RecordRTC(stream, {
@@ -37,8 +92,19 @@ export default function RecordingSection({ onRecordingComplete, onError }: Recor
         disableLogs: true,
       });
       
+      console.log("[Recording] Starting recording");
       recorder.startRecording();
       recorderRef.current = recorder;
+      
+      // If component was unmounted, clean up
+      if (unmountedRef.current) {
+        console.log("[Recording] Component unmounted after recorder initialization, cleaning up");
+        recorder.stopRecording();
+        stream.getTracks().forEach(track => track.stop());
+        isStartingRef.current = false;
+        return;
+      }
+      
       setIsRecording(true);
       
       // Start timer
@@ -46,123 +112,156 @@ export default function RecordingSection({ onRecordingComplete, onError }: Recor
       timerRef.current = window.setInterval(() => {
         setRecordingTime(prev => prev + 1);
       }, 1000);
+      
+      isStartingRef.current = false;
     } catch (error) {
+      console.error("[Recording] Error accessing microphone:", error);
       onError("Could not access microphone. Please ensure you have granted permission.");
+      isStartingRef.current = false;
     }
   };
 
   const stopRecording = () => {
-    if (recorderRef.current) {
-      // Use a flag to prevent multiple calls in React strict mode
-      const isStoppingRef = { current: false };
-      
-      if (!isStoppingRef.current) {
-        isStoppingRef.current = true;
-        
-        recorderRef.current.stopRecording(() => {
-          const blob = recorderRef.current?.getBlob();
-          if (blob) {
-            // Add a small delay to ensure we don't create multiple blobs
-            setTimeout(() => {
-              onRecordingComplete(blob);
-            }, 10);
-          }
-          
-          // Stop timer
-          if (timerRef.current) {
-            clearInterval(timerRef.current);
-            timerRef.current = null;
-          }
-          
-          // Stop media stream
-          if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-          }
-          
-          recorderRef.current = null;
-          setIsRecording(false);
-        });
-      }
+    // Prevent duplicate stops
+    if (isStoppingRef.current || !recorderRef.current || !isRecording) {
+      console.log("[Recording] Not recording or already stopping, ignoring duplicate call");
+      return;
     }
+    
+    // Set flag to prevent multiple stops
+    isStoppingRef.current = true;
+    console.log("[Recording] Stopping recording");
+    
+    recorderRef.current.stopRecording(() => {
+      const blob = recorderRef.current?.getBlob();
+      
+      // Stop timer
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      
+      // Stop media stream
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      
+      // If component was unmounted, clean up silently
+      if (unmountedRef.current) {
+        console.log("[Recording] Component unmounted during stop, skipping callbacks");
+        isStoppingRef.current = false;
+        return;
+      }
+      
+      // Reset recorder ref
+      recorderRef.current = null;
+      setIsRecording(false);
+      
+      // Process the blob if we have one
+      if (blob) {
+        // Create a unique identifier for this recording based on size and timestamp
+        const recordingId = `recording-${blob.size}-${Date.now()}`;
+        
+        // Skip if we've already processed this or a very similar recording
+        // (prevents duplicate processing in React strict mode)
+        if (processedRecordings.has(recordingId) || 
+            recordingId === lastRecordingIdRef.current) {
+          console.log(`[Recording] Skipping duplicate recording: ${recordingId}`);
+          isStoppingRef.current = false;
+          return;
+        }
+        
+        // Track this recording
+        processedRecordings.add(recordingId);
+        lastRecordingIdRef.current = recordingId;
+        
+        console.log(`[Recording] Processing recording: ${recordingId}, size: ${blob.size} bytes`);
+        
+        // Add a small delay to ensure we don't create multiple blobs
+        setTimeout(() => {
+          onRecordingComplete(blob);
+          isStoppingRef.current = false;
+        }, 50);
+      } else {
+        console.error("[Recording] Failed to get recording blob");
+        onError("Failed to process recording. Please try again.");
+        isStoppingRef.current = false;
+      }
+    });
   };
 
   const handleCancel = () => {
-    if (recorderRef.current) {
-      // Use a flag to prevent multiple calls in React strict mode
-      const isCancellingRef = { current: false };
-      
-      if (!isCancellingRef.current) {
-        isCancellingRef.current = true;
-        
-        recorderRef.current.stopRecording(() => {
-          // Stop timer
-          if (timerRef.current) {
-            clearInterval(timerRef.current);
-            timerRef.current = null;
-          }
-          
-          // Stop media stream
-          if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-          }
-          
-          recorderRef.current = null;
-          setIsRecording(false);
-          setRecordingTime(0);
-        });
-      }
+    // Prevent duplicate cancels
+    if (isCancellingRef.current || !recorderRef.current || !isRecording) {
+      return;
     }
+    
+    // Set flag to prevent multiple cancels
+    isCancellingRef.current = true;
+    console.log("[Recording] Cancelling recording");
+    
+    recorderRef.current.stopRecording(() => {
+      // Stop timer
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      
+      // Stop media stream
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+      
+      // If component was unmounted, clean up silently
+      if (unmountedRef.current) {
+        isCancellingRef.current = false;
+        return;
+      }
+      
+      recorderRef.current = null;
+      setIsRecording(false);
+      setRecordingTime(0);
+      isCancellingRef.current = false;
+    });
   };
-
-  // Track the last uploaded file to prevent duplicates
-  const lastUploadedFileRef = useRef<string>('');
   
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
-    if (files && files.length > 0) {
-      const file = files[0];
-      const validTypes = ['audio/wav', 'audio/mpeg', 'audio/ogg', 'audio/webm'];
+    if (!files || files.length === 0) return;
+    
+    const file = files[0];
+    const validTypes = ['audio/wav', 'audio/mpeg', 'audio/ogg', 'audio/webm'];
+    
+    // Generate a unique identifier for this file
+    const fileId = `file-${file.name}-${file.size}-${file.lastModified}-${Date.now()}`;
+    
+    // Skip if we've already processed this file (prevents duplicate processing in React strict mode)
+    if (processedFileUploads.has(fileId)) {
+      console.log(`[Recording] Skipping duplicate file upload: ${fileId}`);
+      return;
+    }
+    
+    // Track this file upload
+    processedFileUploads.add(fileId);
+    console.log(`[Recording] Processing file upload: ${fileId}, type: ${file.type}, size: ${file.size} bytes`);
+    
+    if (validTypes.includes(file.type)) {
+      // Small delay to ensure we don't trigger multiple processing events
+      setTimeout(() => {
+        onRecordingComplete(file);
+        
+        // Reset the input to allow selecting the same file again
+        event.target.value = '';
+      }, 50);
+    } else {
+      onError("Please upload a valid audio file (WAV, MP3, OGG, or WebM).");
       
-      // Generate a simple identifier for this file
-      const fileId = `${file.name}-${file.size}-${file.lastModified}`;
-      
-      // Check if we've already processed this file
-      if (fileId === lastUploadedFileRef.current) {
-        return; // Skip if already processed
-      }
-      
-      // Save this file's identifier
-      lastUploadedFileRef.current = fileId;
-      
-      if (validTypes.includes(file.type)) {
-        // Small delay to ensure we don't trigger multiple processing events
-        setTimeout(() => {
-          onRecordingComplete(file);
-        }, 10);
-      } else {
-        onError("Please upload a valid audio file (WAV, MP3, OGG, or WebM).");
-      }
+      // Reset the input
+      event.target.value = '';
     }
   };
-
-  useEffect(() => {
-    // Cleanup on unmount
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      
-      if (recorderRef.current) {
-        recorderRef.current.stopRecording();
-      }
-    };
-  }, []);
   
   return (
     <Card className="bg-white rounded-xl shadow-sm p-4 mb-6">
