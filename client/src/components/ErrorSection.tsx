@@ -1,5 +1,6 @@
 import { Card } from '@/components/ui/card';
 import { FaExclamationCircle } from 'react-icons/fa';
+import TwitterApiError from './TwitterApiError';
 
 interface ErrorSectionProps {
   errorMessage: string;
@@ -7,6 +8,20 @@ interface ErrorSectionProps {
 }
 
 export default function ErrorSection({ errorMessage, onTryAgain }: ErrorSectionProps) {
+  // Check if this is a Twitter API related error
+  const isTwitterError = 
+    errorMessage.includes('Twitter authentication failed') || 
+    errorMessage.includes('Twitter API') || 
+    errorMessage.includes('Permission denied by Twitter') ||
+    errorMessage.includes('Twitter rate limit') ||
+    errorMessage.includes('Failed to post tweet');
+  
+  // If it's a Twitter API error, show the specialized component
+  if (isTwitterError) {
+    return <TwitterApiError message={errorMessage} onClose={onTryAgain} />;
+  }
+  
+  // Otherwise show the general error component
   return (
     <Card className="bg-white rounded-xl shadow-sm p-6 text-center">
       <div className="flex flex-col items-center">

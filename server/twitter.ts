@@ -1,29 +1,55 @@
 // Twitter API v2 client
 import { TwitterApi } from "twitter-api-v2";
 
-// Function to create a new client on each request to ensure we have fresh credentials
+/**
+ * Checks if Twitter API credentials are properly configured
+ * Returns an object with validation status and specific missing credentials
+ */
+export function validateTwitterCredentials(): { 
+  isValid: boolean; 
+  missingCredentials: string[];
+  message: string;
+} {
+  const missingCredentials = [];
+  
+  if (!process.env.TWITTER_API_KEY) missingCredentials.push('TWITTER_API_KEY');
+  if (!process.env.TWITTER_API_SECRET) missingCredentials.push('TWITTER_API_SECRET');
+  if (!process.env.TWITTER_ACCESS_TOKEN) missingCredentials.push('TWITTER_ACCESS_TOKEN');
+  if (!process.env.TWITTER_ACCESS_SECRET) missingCredentials.push('TWITTER_ACCESS_SECRET');
+  
+  const isValid = missingCredentials.length === 0;
+  let message = isValid 
+    ? 'Twitter API credentials are properly configured' 
+    : `Missing Twitter API credentials: ${missingCredentials.join(', ')}`;
+  
+  return { isValid, missingCredentials, message };
+}
+
+/**
+ * Creates a new Twitter API client instance with credentials from environment variables
+ * Performs credential validation before creating the client
+ */
 function createTwitterClient() {
   console.log('[Twitter] Creating new Twitter API client');
   
   // Validate environment variables
-  if (!process.env.TWITTER_API_KEY || 
-      !process.env.TWITTER_API_SECRET || 
-      !process.env.TWITTER_ACCESS_TOKEN || 
-      !process.env.TWITTER_ACCESS_SECRET) {
-    console.error('[Twitter] Missing Twitter API credentials');
-    throw new Error("Twitter API credentials not configured");
+  const { isValid, message, missingCredentials } = validateTwitterCredentials();
+  
+  if (!isValid) {
+    console.error(`[Twitter] ${message}`);
+    throw new Error(`Twitter API credentials not configured: ${missingCredentials.join(', ')}`);
   }
   
   // Log partial API keys for debugging (only show first few characters)
-  console.log(`[Twitter] Using API key: ${process.env.TWITTER_API_KEY.substring(0, 4)}...`);
-  console.log(`[Twitter] Using Access token: ${process.env.TWITTER_ACCESS_TOKEN.substring(0, 4)}...`);
+  console.log(`[Twitter] Using API key: ${process.env.TWITTER_API_KEY!.substring(0, 4)}...`);
+  console.log(`[Twitter] Using Access token: ${process.env.TWITTER_ACCESS_TOKEN!.substring(0, 4)}...`);
   
   // Initialize the client with credentials from environment variables
   const twitterClient = new TwitterApi({
-    appKey: process.env.TWITTER_API_KEY,
-    appSecret: process.env.TWITTER_API_SECRET,
-    accessToken: process.env.TWITTER_ACCESS_TOKEN,
-    accessSecret: process.env.TWITTER_ACCESS_SECRET,
+    appKey: process.env.TWITTER_API_KEY!,
+    appSecret: process.env.TWITTER_API_SECRET!,
+    accessToken: process.env.TWITTER_ACCESS_TOKEN!,
+    accessSecret: process.env.TWITTER_ACCESS_SECRET!,
   });
   
   // Return the ReadWrite client for posting tweets
@@ -41,6 +67,14 @@ function createTwitterClient() {
  */
 export async function postTweet(text: string): Promise<{ id: string }> {
   try {
+    // Validate Twitter credentials before attempting to post
+    const credentials = validateTwitterCredentials();
+    if (!credentials.isValid) {
+      const errorMsg = `Cannot post tweet: ${credentials.message}`;
+      console.error(`[Twitter] ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+    
     // Create a new client every time to ensure fresh credentials
     const rwClient = createTwitterClient();
     
@@ -48,34 +82,68 @@ export async function postTweet(text: string): Promise<{ id: string }> {
     // console.log('[Twitter] Test mode - would have posted:', text);
     // return { id: `test-${Date.now()}` };
     
+    // Validate tweet text
+    if (!text || text.trim().length === 0) {
+      throw new Error("Tweet text cannot be empty");
+    }
+    
+    if (text.length > 280) {
+      throw new Error("Tweet exceeds the 280 character limit");
+    }
+    
     console.log(`[Twitter] Posting tweet: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`);
     
-    // Post the tweet
-    const { data } = await rwClient.v2.tweet(text);
-    
-    console.log(`[Twitter] Successfully posted tweet with ID: ${data.id}`);
-    return { id: data.id };
+    try {
+      // Post the tweet
+      const { data } = await rwClient.v2.tweet(text);
+      
+      console.log(`[Twitter] Successfully posted tweet with ID: ${data.id}`);
+      return { id: data.id };
+    } catch (twitterApiError: any) {
+      // Special handling for Twitter API-specific errors
+      let errorMessage = "Failed to post tweet";
+      
+      // Extract detailed error information
+      if (twitterApiError.data?.detail) {
+        errorMessage += `: ${twitterApiError.data.detail}`;
+      } else if (twitterApiError.errors && twitterApiError.errors.length > 0) {
+        const details = twitterApiError.errors.map((e: any) => e.message || e.detail || JSON.stringify(e)).join('; ');
+        errorMessage += `: ${details}`;
+      } else if (twitterApiError.message) {
+        errorMessage += `: ${twitterApiError.message}`;
+      }
+      
+      // Add HTTP status code information if available
+      if (twitterApiError.code) {
+        errorMessage += ` (HTTP ${twitterApiError.code})`;
+        
+        // Provide more specific guidance based on error code
+        if (twitterApiError.code === 401) {
+          errorMessage += " - Authentication failed. Your API credentials may be invalid or expired.";
+        } else if (twitterApiError.code === 403) {
+          errorMessage += " - Permission denied. Your app may not have write permissions.";
+        } else if (twitterApiError.code === 429) {
+          errorMessage += " - Rate limit exceeded. Please try again in a few minutes.";
+        }
+      }
+      
+      console.error(`[Twitter] ${errorMessage}`);
+      
+      // Log additional error details for debugging
+      if (twitterApiError.data) {
+        console.error("[Twitter] Error data:", JSON.stringify(twitterApiError.data, null, 2));
+      }
+      
+      throw new Error(errorMessage);
+    }
   } catch (error: any) {
-    // Enhanced error logging
-    console.error("Twitter API error:", error);
-    
-    // Check for common Twitter API errors
-    if (error.code === 401) {
-      console.error("[Twitter] Authentication failed. Please check your Twitter API credentials.");
-    } else if (error.code === 403) {
-      console.error("[Twitter] Permission denied. Your app may not have write permissions.");
-    } else if (error.code === 429) {
-      console.error("[Twitter] Rate limit exceeded. Please try again later.");
+    // This catches errors from credential validation or other non-API errors
+    if (!error.message.includes("Failed to post tweet")) {
+      console.error("[Twitter] Error:", error);
+      throw new Error(`Twitter error: ${error.message}`);
+    } else {
+      // Re-throw the specific API error that was already formatted
+      throw error;
     }
-    
-    // Log any error data for diagnosis
-    if (error.data) {
-      console.error("[Twitter] Error data:", error.data);
-    }
-    
-    // Log error message and code
-    const errorMessage = `Failed to post tweet: ${error.message || 'Unknown error'}`;
-    const errorCode = error.code ? ` (Code: ${error.code})` : '';
-    throw new Error(errorMessage + errorCode);
   }
 }

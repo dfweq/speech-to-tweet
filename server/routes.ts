@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { z } from "zod";
 import { transcribeAudioSchema, generateTweetSchema, postTweetSchema } from "../shared/schema";
 import { transcribeAudio, generateTweetOptions, processTranscription, createTweetThread, processTranscriptionAndCreateTweet } from "./openai";
-import { postTweet } from "./twitter";
+import { postTweet, validateTwitterCredentials } from "./twitter";
 import multer from "multer";
 
 const upload = multer({
@@ -15,6 +15,32 @@ const upload = multer({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // API route to check Twitter API credentials
+  app.get("/api/check-twitter-credentials", (req, res) => {
+    try {
+      const credentialStatus = validateTwitterCredentials();
+      
+      if (credentialStatus.isValid) {
+        res.json({ 
+          status: "ok", 
+          message: credentialStatus.message 
+        });
+      } else {
+        res.status(400).json({ 
+          status: "error", 
+          message: credentialStatus.message,
+          missingCredentials: credentialStatus.missingCredentials 
+        });
+      }
+    } catch (error: any) {
+      console.error("Error checking Twitter credentials:", error);
+      res.status(500).json({ 
+        status: "error", 
+        message: error.message || "Unknown error checking Twitter credentials" 
+      });
+    }
+  });
+  
   // API routes
   app.post("/api/transcribe", async (req, res) => {
     try {
@@ -149,12 +175,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const result = await postTweet(validatedData.text);
         res.json({ id: result.id });
       }
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof z.ZodError) {
-        res.status(400).json({ message: "Invalid request data", errors: error.errors });
+        res.status(400).json({ 
+          status: "error",
+          message: "Invalid request data", 
+          errors: error.errors 
+        });
       } else {
         console.error("Tweet posting error:", error);
-        res.status(500).json({ message: "Failed to post tweet" });
+        
+        // Check if this is a Twitter API error
+        const isTwitterApiError = error.message && (
+          error.message.includes("Twitter") || 
+          error.message.includes("Failed to post tweet") ||
+          error.message.includes("Authentication failed") ||
+          error.message.includes("credentials")
+        );
+        
+        // Get the HTTP status code if it's in the error message
+        let statusCode = 500;
+        
+        if (isTwitterApiError) {
+          if (error.message.includes("401")) {
+            statusCode = 401; // Unauthorized
+          } else if (error.message.includes("403")) {
+            statusCode = 403; // Forbidden
+          } else if (error.message.includes("429")) {
+            statusCode = 429; // Too many requests
+          }
+        }
+        
+        // Send a detailed error response
+        res.status(statusCode).json({ 
+          status: "error",
+          message: error.message || "Failed to post tweet",
+          type: isTwitterApiError ? "twitter_api_error" : "server_error",
+          code: statusCode
+        });
       }
     }
   });
