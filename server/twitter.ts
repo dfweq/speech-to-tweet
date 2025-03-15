@@ -193,7 +193,7 @@ export async function postTweetThread(tweets: string[]): Promise<{
         }
         
         // Store the tweet ID for the next reply
-        const tweetId = response.data.id;
+        const tweetId: string = response.data.id;
         tweetIds.push(tweetId);
         replyToId = tweetId;
         

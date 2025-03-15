@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { z } from "zod";
 import { transcribeAudioSchema, generateTweetSchema, postTweetSchema } from "../shared/schema";
 import { transcribeAudio, generateTweetOptions, processTranscription, createTweetThread, processTranscriptionAndCreateTweet } from "./openai";
-import { postTweet, validateTwitterCredentials, verifyTwitterCredentials } from "./twitter";
+import { postTweet, postTweetThread, validateTwitterCredentials, verifyTwitterCredentials } from "./twitter";
 import multer from "multer";
 
 const upload = multer({
@@ -186,24 +186,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // If tweets array is provided, post as a thread
       if (Array.isArray(tweets) && tweets.length > 0) {
-        let previousTweetId = null;
-        const tweetIds = [];
-        
-        for (const tweetText of tweets) {
-          const postOptions: any = { text: tweetText };
-          
-          // Add reply-to parameter for threading if not the first tweet
-          if (previousTweetId) {
-            postOptions.reply_to = previousTweetId;
-          }
-          
-          // Post the tweet
-          const result = await postTweet(postOptions.text);
-          previousTweetId = result.id;
-          tweetIds.push(result.id);
-        }
-        
-        res.json({ ids: tweetIds, threadId: tweetIds[0] });
+        // Use our thread-specific function that properly creates threaded replies
+        const result = await postTweetThread(tweets);
+        res.json(result);
       } else {
         // Single tweet case
         const validatedData = postTweetSchema.parse({ text });
