@@ -3,14 +3,14 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { z } from "zod";
 import { transcribeAudioSchema, generateTweetSchema, postTweetSchema } from "../shared/schema";
-import { transcribeAudio, generateTweetOptions } from "./openai";
+import { transcribeAudio, generateTweetOptions, processTranscription, createTweetThread } from "./openai";
 import { postTweet } from "./twitter";
 import multer from "multer";
 
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 50 * 1024 * 1024, // 50MB limit (increased from 10MB)
   },
 });
 
@@ -38,6 +38,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  // New routes for the improved workflow
+  app.post("/api/process-transcription", async (req, res) => {
+    try {
+      const { text } = req.body;
+      const validatedData = generateTweetSchema.parse({ text });
+      
+      // Process transcription to make it coherent
+      const processedText = await processTranscription(validatedData.text);
+      
+      res.json({ processedText });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid request data", errors: error.errors });
+      } else {
+        console.error("Error in /api/process-transcription:", error);
+        res.status(500).json({ message: "Failed to process transcription" });
+      }
+    }
+  });
+
+  app.post("/api/create-tweet-thread", async (req, res) => {
+    try {
+      const { text } = req.body;
+      const validatedData = generateTweetSchema.parse({ text });
+      
+      // Create tweet thread from processed text
+      const tweetThread = await createTweetThread(validatedData.text);
+      
+      res.json({ tweets: tweetThread });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid request data", errors: error.errors });
+      } else {
+        console.error("Error in /api/create-tweet-thread:", error);
+        res.status(500).json({ message: "Failed to create tweet thread" });
+      }
+    }
+  });
+  
+  // Keep the original endpoints for backward compatibility
   app.post("/api/generate-tweet", async (req, res) => {
     try {
       const { text, alternativesOnly } = req.body;
@@ -57,14 +97,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  // Enhanced post-tweet endpoint for thread support
   app.post("/api/post-tweet", async (req, res) => {
     try {
-      const validatedData = postTweetSchema.parse(req.body);
+      // Check if this is a tweet thread or a single tweet
+      const { text, tweets } = req.body;
       
-      // Post to Twitter
-      const result = await postTweet(validatedData.text);
-      
-      res.json({ id: result.id });
+      // If tweets array is provided, post as a thread
+      if (Array.isArray(tweets) && tweets.length > 0) {
+        let previousTweetId = null;
+        const tweetIds = [];
+        
+        for (const tweetText of tweets) {
+          const postOptions: any = { text: tweetText };
+          
+          // Add reply-to parameter for threading if not the first tweet
+          if (previousTweetId) {
+            postOptions.reply_to = previousTweetId;
+          }
+          
+          // Post the tweet
+          const result = await postTweet(postOptions.text);
+          previousTweetId = result.id;
+          tweetIds.push(result.id);
+        }
+        
+        res.json({ ids: tweetIds, threadId: tweetIds[0] });
+      } else {
+        // Single tweet case
+        const validatedData = postTweetSchema.parse({ text });
+        const result = await postTweet(validatedData.text);
+        res.json({ id: result.id });
+      }
     } catch (error) {
       if (error instanceof z.ZodError) {
         res.status(400).json({ message: "Invalid request data", errors: error.errors });

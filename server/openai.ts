@@ -59,7 +59,68 @@ export async function transcribeAudio(
 }
 
 /**
- * Generates tweet options from text using GPT-4o
+ * Processes raw transcription and creates a coherent tweet thread in a single call
+ */
+export async function processTranscriptionAndCreateTweet(rawTranscript: string): Promise<string[]> {
+  console.log(`[GPT-4o] Processing transcription and creating tweets: "${rawTranscript.substring(0, 100)}${rawTranscript.length > 100 ? '...' : ''}"`);
+  
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o", // the newest OpenAI model is "gpt-4o" which was released May 13, 2024
+      messages: [
+        {
+          role: "system",
+          content: "You are a text editor and Twitter specialist that improves transcribed speech and formats it for Twitter. You fix grammar, remove filler words, make the text coherent, and format it appropriately for Twitter's character limits."
+        },
+        {
+          role: "user",
+          content: `This is a raw speech-to-text transcription: "${rawTranscript}"
+                   
+                   Please:
+                   1. Fix grammar and make the text coherent while preserving the original meaning
+                   2. Remove filler words and repetitive language
+                   3. Format as a tweet or tweet thread:
+                      - If under 280 characters, return as a single tweet
+                      - If longer, split into multiple tweets (max 280 chars each)
+                      - Split at natural breaks (end of sentences)
+                      - Add thread numbering (1/n, 2/n, etc.) if multiple tweets
+                      - Each tweet should read well independently and as part of the thread
+                   4. Return as a JSON array of tweet strings`
+        }
+      ],
+      temperature: 0.4,
+      response_format: { type: "json_object" }
+    });
+    
+    const content = response.choices[0].message.content;
+    const parsedResponse = JSON.parse(content);
+    const tweetThread = Array.isArray(parsedResponse.tweets) ? parsedResponse.tweets : [rawTranscript];
+    
+    console.log(`[GPT-4o] Generated tweet thread with ${tweetThread.length} tweets from raw transcription`);
+    tweetThread.forEach((tweet: string, i: number) => console.log(`[GPT-4o] Tweet ${i+1}: "${tweet}"`));
+    
+    return tweetThread;
+  } catch (error) {
+    console.error("Error processing transcription and creating tweets:", error);
+    return [rawTranscript]; // Fall back to original text if processing fails
+  }
+}
+
+// Keep these for backward compatibility
+export async function processTranscription(rawTranscript: string): Promise<string> {
+  console.log(`[Deprecated] processTranscription called. Using unified function instead.`);
+  const tweets = await processTranscriptionAndCreateTweet(rawTranscript);
+  return tweets.join(" ");
+}
+
+export async function createTweetThread(processedText: string): Promise<string[]> {
+  console.log(`[Deprecated] createTweetThread called. Using unified function instead.`);
+  return processTranscriptionAndCreateTweet(processedText);
+}
+
+/**
+ * Generates alternative tweet options from text using GPT-4o
+ * This function is kept for backward compatibility
  */
 export async function generateTweetOptions(
   text: string,
