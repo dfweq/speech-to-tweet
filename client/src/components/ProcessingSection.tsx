@@ -22,14 +22,14 @@ export default function ProcessingSection({
   onError
 }: ProcessingSectionProps) {
   
+  // Use a ref to prevent duplicate requests in development strict mode  
+  const hasProcessedRef = useRef(false);
+
   useEffect(() => {
     if (!audioBlob) {
       onError("No audio data found. Please try recording again.");
       return;
     }
-    
-    // Use a ref to prevent duplicate requests in development strict mode  
-    const hasProcessedRef = useRef(false);
     
     const processAudio = async () => {
       // Prevent duplicate processing of the same audio blob
