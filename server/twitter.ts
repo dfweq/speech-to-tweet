@@ -1,6 +1,9 @@
 // Twitter API v2 client
 import { TwitterApi } from "twitter-api-v2";
 
+// Test mode - set to true to return mock data instead of making real API calls
+const TEST_MODE = false;
+
 /**
  * Checks if Twitter API credentials are properly configured
  * Returns an object with validation status and specific missing credentials
@@ -23,6 +26,71 @@ export function validateTwitterCredentials(): {
     : `Missing Twitter API credentials: ${missingCredentials.join(', ')}`;
   
   return { isValid, missingCredentials, message };
+}
+
+/**
+ * Verifies Twitter API credentials by making a simple API call that doesn't post anything
+ * Uses the GET /2/users/me endpoint to check if credentials are valid
+ */
+export async function verifyTwitterCredentials(): Promise<{ 
+  isValid: boolean; 
+  message: string;
+  userData?: any;
+}> {
+  try {
+    // First check if all required credentials exist
+    const credentialsCheck = validateTwitterCredentials();
+    if (!credentialsCheck.isValid) {
+      return {
+        isValid: false,
+        message: credentialsCheck.message
+      };
+    }
+
+    // For test mode, return success without making API call
+    if (TEST_MODE) {
+      console.log('[Twitter] Test mode - credentials verification bypassed');
+      return {
+        isValid: true,
+        message: 'Twitter API credentials verified (TEST MODE)',
+        userData: { id: 'test-user-id', username: 'test_user' }
+      };
+    }
+    
+    // Create Twitter client
+    const rwClient = createTwitterClient();
+    
+    console.log('[Twitter] Verifying credentials by fetching user data');
+    
+    // Make a simple API call to verify credentials - fetches authenticated user data
+    const { data } = await rwClient.v2.me();
+    
+    console.log(`[Twitter] Successfully verified credentials for user: ${data.username} (${data.id})`);
+    
+    return {
+      isValid: true,
+      message: `Twitter API credentials verified for user: ${data.username}`,
+      userData: data
+    };
+  } catch (error: any) {
+    console.error('[Twitter] Credential verification failed:', error);
+    
+    let errorMessage = 'Twitter API credentials are invalid or expired';
+    
+    // Extract more specific error information if available
+    if (error.code === 401) {
+      errorMessage = 'Twitter authentication failed. Your API credentials are invalid or expired.';
+    } else if (error.code === 403) {
+      errorMessage = 'Permission denied. Your Twitter app may not have the required permissions.';
+    } else if (error.message) {
+      errorMessage = `Twitter API error: ${error.message}`;
+    }
+    
+    return {
+      isValid: false,
+      message: errorMessage
+    };
+  }
 }
 
 /**

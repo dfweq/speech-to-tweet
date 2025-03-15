@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { FaRedoAlt, FaPencilAlt, FaPaperPlane, FaSyncAlt } from 'react-icons/fa';
 import { useToast } from '@/hooks/use-toast';
 import { generateTweetOptions } from '@/lib/openai';
-import { postTweet } from '@/lib/twitter';
+import { postTweet, checkTwitterCredentials } from '@/lib/twitter';
 
 interface ResultsSectionProps {
   tweetText: string;
@@ -88,6 +88,26 @@ export default function ResultsSection({
     try {
       setIsPosting(true);
       
+      // Check Twitter credentials before attempting to post
+      console.log('[Tweet] Checking Twitter credentials before posting');
+      const credentialsCheck = await checkTwitterCredentials();
+      
+      if (!credentialsCheck.isValid) {
+        // If credentials aren't valid, show a more specific error
+        const errorMsg = credentialsCheck.message;
+        console.error(`[Tweet] Twitter credentials issue: ${errorMsg}`);
+        
+        toast({
+          title: "Twitter Credentials Error",
+          description: errorMsg,
+          variant: "destructive",
+        });
+        
+        onError(errorMsg);
+        return;
+      }
+      
+      // Credentials are valid, proceed with posting
       console.log(`[Tweet] Attempting to post tweet: "${tweetText.substring(0, 30)}${tweetText.length > 30 ? '...' : ''}"`);
       await postTweet(tweetText);
       
@@ -105,12 +125,14 @@ export default function ResultsSection({
       
       if (error && error.message) {
         // Check for specific error types
-        if (error.message.includes("401")) {
+        if (error.message.includes("401") || error.message.includes("Authentication failed")) {
           errorMessage = "Twitter authentication failed. Your API credentials may be invalid or expired.";
-        } else if (error.message.includes("403")) {
+        } else if (error.message.includes("403") || error.message.includes("Permission denied")) {
           errorMessage = "Permission denied by Twitter. Your app may not have write permissions.";
-        } else if (error.message.includes("429")) {
+        } else if (error.message.includes("429") || error.message.includes("rate limit")) {
           errorMessage = "Twitter rate limit exceeded. Please try again in a few minutes.";
+        } else if (error.message.includes("credentials not configured") || error.message.includes("API credentials")) {
+          errorMessage = "Twitter API credentials are missing or invalid. Please check your environment variables.";
         } else {
           // Use the error message from the API
           errorMessage = `Error: ${error.message}`;

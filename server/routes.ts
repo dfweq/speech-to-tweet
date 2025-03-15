@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { z } from "zod";
 import { transcribeAudioSchema, generateTweetSchema, postTweetSchema } from "../shared/schema";
 import { transcribeAudio, generateTweetOptions, processTranscription, createTweetThread, processTranscriptionAndCreateTweet } from "./openai";
-import { postTweet, validateTwitterCredentials } from "./twitter";
+import { postTweet, validateTwitterCredentials, verifyTwitterCredentials } from "./twitter";
 import multer from "multer";
 
 const upload = multer({
@@ -15,7 +15,7 @@ const upload = multer({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // API route to check Twitter API credentials
+  // API route to check if Twitter API credentials exist (without making API call)
   app.get("/api/check-twitter-credentials", (req, res) => {
     try {
       const credentialStatus = validateTwitterCredentials();
@@ -37,6 +37,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ 
         status: "error", 
         message: error.message || "Unknown error checking Twitter credentials" 
+      });
+    }
+  });
+  
+  // API route to verify Twitter credentials by making a real API call
+  app.get("/api/verify-twitter-credentials", async (req, res) => {
+    try {
+      console.log("[Twitter] Verifying Twitter credentials with API call");
+      
+      // This makes an actual API call to verify the credentials
+      const verificationResult = await verifyTwitterCredentials();
+      
+      if (verificationResult.isValid) {
+        const userData = verificationResult.userData || {};
+        console.log(`[Twitter] Credentials verified successfully for user: ${userData.username || 'unknown'}`);
+        
+        res.json({
+          status: "ok",
+          message: verificationResult.message,
+          userData: userData
+        });
+      } else {
+        console.error(`[Twitter] Credential verification failed: ${verificationResult.message}`);
+        
+        res.status(401).json({
+          status: "error",
+          message: verificationResult.message
+        });
+      }
+    } catch (error: any) {
+      console.error("Error verifying Twitter credentials:", error);
+      
+      res.status(500).json({
+        status: "error",
+        message: error.message || "Unknown error verifying Twitter credentials"
       });
     }
   });
