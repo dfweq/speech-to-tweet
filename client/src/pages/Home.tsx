@@ -25,14 +25,23 @@ export default function Home() {
   const lastProcessedBlobId = useRef<string>('');
 
   const handleRecordingComplete = (blob: Blob) => {
-    // Create a unique identifier for this blob
-    const blobId = `${blob.size}-${blob.type}-${Date.now()}`;
+    // Create a unique identifier for this blob that's focused on its content 
+    // (without timestamp to properly deduplicate)
+    const blobId = `${blob.size}-${blob.type}`;
     
-    // Check if we're already processing or have processed this blob
-    if (isCurrentlyProcessing || blobId === lastProcessedBlobId.current) {
-      console.log('Skipping duplicate processing request');
+    // Check if we're already processing
+    if (isCurrentlyProcessing) {
+      console.log('[Home] Already processing audio, ignoring duplicate request');
       return;
     }
+    
+    // Check if we've already processed this exact blob
+    if (blobId === lastProcessedBlobId.current) {
+      console.log('[Home] Skipping duplicate processing of the same blob');
+      return;
+    }
+    
+    console.log(`[Home] Processing new audio blob: ${blobId}, size: ${blob.size} bytes`);
     
     // Set global processing flag and save blob identifier
     isCurrentlyProcessing = true;

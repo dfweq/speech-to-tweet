@@ -45,18 +45,25 @@ export default function ProcessingSection({
     };
   }, []);
 
+  // This will run only once when the audioBlob prop changes
   useEffect(() => {
     // Exit early if no audio blob
     if (!audioBlob) {
-      onError("No audio data found. Please try recording again.");
+      return;
+    }
+    
+    // Only execute this logic on the initial mount with a valid audioBlob
+    // Do not process if we're already processing
+    if (processingRef.current) {
       return;
     }
     
     // Generate a simple identifier for this audio blob
-    const audioBlobId = `${audioBlob.size}-${audioBlob.type}-${Date.now()}`;
+    // Don't include Date.now() in the ID to allow for proper deduplication
+    const audioBlobId = `${audioBlob.size}-${audioBlob.type}`;
     
-    // Skip if we've already processed this blob or if we're currently processing
-    if (processingRef.current || processedAudioBlobs.has(audioBlobId)) {
+    // Skip if we've already processed this blob
+    if (processedAudioBlobs.has(audioBlobId)) {
       console.log(`[Processing] Skipping duplicate processing for blob: ${audioBlobId}`);
       return;
     }
