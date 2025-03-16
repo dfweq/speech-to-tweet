@@ -162,12 +162,17 @@ export default function ProcessingSection({
       console.log(`[Processing] Adding additional text: "${additionalText}"`);
       
       // Combine the transcript with the additional text
-      const combinedText = additionalText 
-        ? `${transcriptText} ${additionalText}`
-        : transcriptText;
+      // If the additional text is present, add it with a space
+      const combinedText = additionalText.trim() 
+        ? `${transcriptText.trim()} ${additionalText.trim()}`
+        : transcriptText.trim();
       
       // Process the combined text
       console.log(`[Processing] Processing combined text: "${combinedText.substring(0, 50)}${combinedText.length > 50 ? '...' : ''}"`);
+      
+      // Add delay to ensure UI updates before API call
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       const tweets = await processTranscriptionAndCreateTweet(combinedText);
       
       // Complete the process

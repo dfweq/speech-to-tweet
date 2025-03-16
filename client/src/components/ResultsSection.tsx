@@ -125,7 +125,8 @@ export default function ResultsSection({
           variant: "destructive",
         });
         
-        onError(errorMsg);
+        // Do not call onError here to prevent navigation away from this screen
+        // We want the user to see the TwitterApiError component
         return;
       }
       
@@ -138,13 +139,17 @@ export default function ResultsSection({
         const errorMsg = verificationResult.message;
         console.error(`[Tweet] Twitter credentials validation failed: ${errorMsg}`);
         
+        // Show the Twitter API error dialog
+        setTwitterErrorMessage(errorMsg);
+        setShowTwitterError(true);
+        
         toast({
           title: "Twitter Authentication Error",
           description: errorMsg,
           variant: "destructive",
         });
         
-        onError(errorMsg);
+        // Do not call onError here to prevent navigation away from this screen
         return;
       }
       
@@ -158,16 +163,34 @@ export default function ResultsSection({
         description: `Verified as @${userData?.username || 'user'}`,
       });
       
+      // Add a slight delay to ensure UI updates before API call
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       // Post the tweet
       console.log(`[Tweet] Attempting to post tweet: "${tweetText.substring(0, 30)}${tweetText.length > 30 ? '...' : ''}"`);
-      await postTweet(tweetText);
-      
-      toast({
-        title: "Success!",
-        description: "Your tweet was posted successfully",
-      });
-      
-      onPostSuccess();
+      try {
+        await postTweet(tweetText);
+        
+        toast({
+          title: "Success!",
+          description: "Your tweet was posted successfully",
+        });
+        
+        onPostSuccess();
+      } catch (postError: any) {
+        // Special handling for Twitter API errors during posting
+        console.error('[Tweet] Error during posting:', postError);
+        
+        // Show detailed error and error dialog
+        setTwitterErrorMessage(postError.message || "Twitter posting failed");
+        setShowTwitterError(true);
+        
+        toast({
+          title: "Tweet Posting Error",
+          description: postError.message || "Failed to post to Twitter",
+          variant: "destructive",
+        });
+      }
     } catch (error: any) {
       console.error('Error posting tweet:', error);
       
@@ -178,12 +201,21 @@ export default function ResultsSection({
         // Check for specific error types
         if (error.message.includes("401") || error.message.includes("Authentication failed")) {
           errorMessage = "Twitter authentication failed. Your API credentials may be invalid or expired.";
+          // Show the Twitter API error dialog for auth issues
+          setTwitterErrorMessage(errorMessage);
+          setShowTwitterError(true);
         } else if (error.message.includes("403") || error.message.includes("Permission denied")) {
           errorMessage = "Permission denied by Twitter. Your app may not have write permissions.";
+          // Show the Twitter API error dialog for permission issues
+          setTwitterErrorMessage(errorMessage);
+          setShowTwitterError(true);
         } else if (error.message.includes("429") || error.message.includes("rate limit")) {
           errorMessage = "Twitter rate limit exceeded. Please try again in a few minutes.";
         } else if (error.message.includes("credentials not configured") || error.message.includes("API credentials")) {
           errorMessage = "Twitter API credentials are missing or invalid. Please check your environment variables.";
+          // Show the Twitter API error dialog for credential issues
+          setTwitterErrorMessage(errorMessage);
+          setShowTwitterError(true);
         } else {
           // Use the error message from the API
           errorMessage = `Error: ${error.message}`;
@@ -197,7 +229,10 @@ export default function ResultsSection({
         variant: "destructive",
       });
       
-      onError(errorMessage);
+      // Only call onError for non-credential related issues
+      if (!setShowTwitterError) {
+        onError(errorMessage);
+      }
     } finally {
       setIsPosting(false);
     }
