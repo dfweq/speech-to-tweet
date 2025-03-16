@@ -1,4 +1,4 @@
-# Voice-to-Tweet
+# Speech to tweet
 
 A modern web application that converts your spoken audio into Twitter-ready posts, making social media content creation effortless.
 
